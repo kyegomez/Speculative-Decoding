@@ -13,6 +13,18 @@ The speculative sampling is proposed by Google and Deepmind independently. So I 
 - 2023.08.16: First release, implement the paper's algorithm. Support Bloom-560M and Bloomz-7B1.
 
 ## Usage
+
+### Environment 
+1. You need to build create a new python package environment.
+2. Activate new environment
+3. Install required packages: `pip install -r requirements.txt`
+   - Note: if you encounter errors, create a new environment, go to Pytorch website, and follow instructions to install Pytorch in your environment specific to your machine (e.g. for UVA cs servers choose Linux, and CUDA 11.8). After installing Pytorch, install the rest of the packages requirements.txt. (Note:I installed `transformers`, not `transformers==4.33.2`)
+4. If you are trying to run a T5 model, you need to install the following additionl packages: ```sentencepiece google, protobuf, accelerate```
+    - Note: I have not been able to get T5 models to work yet.
+5. Check what GPU usage by running `nvidia-smi` on your machine's terminal. Find a gpu that isn't being used much.
+6. Go to `LLMSpeculativeSampling/main.py` and hard code any `'cuda:<#>'` string with `'cuda:<the gpu you number you found>'`
+7. Continue to inference stage
+
 ### Inference
 You need prepare a pair of models using the same embedding and vocabulary. The approximation model should be smaller than the target model. Here are some
 tested model pairs.
