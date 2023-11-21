@@ -95,7 +95,6 @@ watch -n 1 nvidia-smi
 To run distributed inference on a list of prompts with a number of processes, run the following command.
 ```bash
 accelerate launch --num_processes=4 dist_inf.py \
-    --input "The quick brown fox jumps over the lazy " \
     --target_model_name bigscience/bloom-560m \
     --approx_model_name bigscience/bloom-560m
 
