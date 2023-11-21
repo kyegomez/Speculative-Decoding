@@ -65,7 +65,46 @@ python serving.py
 Test the serving with curl:
 ```bash
 curl -X POST -H "Content-Type: application/json" -d '{"prompt": "Who is the president of the USA"}' http://127.0.0.1:5000/predict
+
 ```
+### GPU-parallelization
+Before doing this, we should run
+```bash
+nvidia-smi
+```
+to check which GPUs are available. 
+
+This is done by setting some params while loading the model. Here we choose GPU 2 and 3, each allocated with 9GB.
+
+```python
+small_model = AutoModelForCausalLM.from_pretrained(
+	approx_model_name,
+	torch_dtype=torch.float16,
+	device_map=”auto”,
+	trust_remote_code=True,
+	max_memory={2: “9GB”, 3: “9GB”})
+```
+During the inference stage, we can set up another terminal to see real-time GPU usage by running the following command,
+```bash
+watch -n 1 nvidia-smi
+```
+, and we shall see that GPU 2 and 3 are working together.
+
+
+### Distributed inference
+To run distributed inference on a list of prompts with a number of processes, run the following command.
+```bash
+accelerate launch --num_processes=4 dist_inf.py \
+    --input "The quick brown fox jumps over the lazy " \
+    --target_model_name bigscience/bloom-560m \
+    --approx_model_name bigscience/bloom-560m
+
+```
+References for distributed inference:
+
+https://www.bengubler.com/posts/multi-gpu-inference-with-accelerate
+
+
 ## References
 ```
 @inproceedings{leviathan2023fast,
