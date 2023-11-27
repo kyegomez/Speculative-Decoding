@@ -1,10 +1,81 @@
 import torch
 from tqdm import tqdm
 import torch
+import torch.nn.functional as F
+
 
 from sampling.kvcache_model import KVCacheModel
 from sampling.utils import norm_logits, sample, max_fn
 from globals import Decoder
+
+# def calculate_kl_divergence(p_x, q_x):
+#     kl_div = F.kl_div(q_x.log(), p_x, reduction='batchmean')
+#     return kl_div
+def calculate_kl_divergence(p_x, q_x):
+    kl_div = F.kl_div(p_x.log(), q_x, reduction='batchmean')
+    return kl_div
+
+
+
+def calculate_alpha(p_cache, q_cache):
+    # Ensure that self._prob_history contains the probabilities from the approximate model
+    # and that there is a corresponding set of probabilities from the target model
+    assert p_cache._prob_history is not None, "Probability history from the approximate model is not available."
+    
+    # p(x) - probabilities from the target model
+    # q(x) - probabilities from the approximate model
+    p_x = p_cache._prob_history  # You will need to store the target model's probabilities as well
+    q_x = q_cache._prob_history
+    
+    # Get the minimum length to match shapes
+    min_length = min(p_x.size(1), q_x.size(1))
+    
+    # Truncate the larger tensor to match the size of the smaller one
+    if p_x.size(1) > min_length:
+        p_x = p_x[:, :min_length, :]
+    if q_x.size(1) > min_length:
+        q_x = q_x[:, :min_length, :]
+
+
+    # print("Logt values: ", p_x)
+
+      # Convert logits to probabilities
+    p_x = torch.softmax(p_x, dim=-1)  # Probabilities from the target model
+    q_x = torch.softmax(q_x, dim=-1)  # Probabilities from the approximate mode
+
+    p_x = torch.squeeze(p_x)
+    q_x = torch.squeeze(q_x)
+
+    # NOTE: We estimate the natural divergence using KL-divergence
+    # Calculate KL divergence for each token and average
+    kl_divs = [calculate_kl_divergence(p_x[i].unsqueeze(0), q_x[i].unsqueeze(0)) for i in range(p_x.size(0))]
+    average_kl_div = torch.mean(torch.stack(kl_divs))
+
+    # Compute alpha
+    alpha = 1 - average_kl_div.item()
+
+    print(f"Alpha: {alpha}")
+
+
+
+    # print("prob values: ", p_x)
+
+    # print("prob shapes: ",  p_x.shape, q_x.shape)
+
+    # # Calculate the minimum between p(x) and q(x) for each x
+    # min_p_q = torch.minimum(p_x, q_x)
+    # max_p_q = torch.maximum(p_x, q_x)
+    # # print("MIN Q v P: ", min_p_q)
+    # # print("MAX Q v P: ", max_p_q)
+    # # print("Shape MIN Q v P: ", min_p_q.shape)
+    # # Calculate the expected value of the minimums (sum over all tokens, then average)
+    # alpha = torch.sum(min_p_q, dim=-1).mean().item()  # Ensure it's a scalar
+
+    # alpha = 1 - torch.sum(min_p_q, dim=-1)
+
+    return alpha
+
+
 
 @torch.no_grad()
 def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, 
@@ -98,9 +169,16 @@ def speculative_sampling(prefix : torch.Tensor, approx_model : torch.nn.Module, 
         
         prefix = torch.cat((prefix, t), dim=1)
 
+    # calculate alpha value: 
+    alpha = calculate_alpha(target_model_cache, approx_model_cache)
+
     if verbose:
         print(f"generated tokens numbers {prefix.shape[-1] - seq_len}, accepted_count {accepted_count}, target_sample_count {target_sample_count}, resample_count {resample_count}")
-    return prefix
+    
+
+
+    return prefix, alpha
+
 
 
 @torch.no_grad()

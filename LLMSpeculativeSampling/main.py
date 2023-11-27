@@ -6,7 +6,7 @@ from colorama import Fore, Style
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # Specific for T5 model 
-from transformers import T5Tokenizer, T5ForConditionalGeneration
+from transformers import T5Tokenizer, T5ForConditionalGeneration, AutoModelForSeq2SeqLM
 
 from sampling import autoregressive_sampling, speculative_sampling, speculative_sampling_v2
 from globals import Decoder
@@ -41,6 +41,7 @@ def parse_arguments():
     parser.add_argument('--profiling', '-p', action='store_true', default=False, help='collect torch profiler results.')
     parser.add_argument('--max_tokens', '-M', type=int, default=20, help='max token number generated.')
     parser.add_argument('--gamma', '-g', type=int, default=4, help='guess time.')
+    parser.add_argument('--gpu_num', '-d', type=int, default=0, help='gpu device number')
     args = parser.parse_args()
     return args
 
@@ -49,6 +50,8 @@ def color_print(text):
     print(Fore.RED + text + Style.RESET_ALL)
     
 def benchmark(fn, print_prefix, use_profiler=True, *args, **kwargs):
+    print("I am benchmarking")
+    
     TEST_TIME = 10
     profile_filename = f"./profile_logs/{print_prefix}"
     
@@ -63,7 +66,8 @@ def benchmark(fn, print_prefix, use_profiler=True, *args, **kwargs):
                 # with_stack=True
             ) as prof:
                 for _ in range(TEST_TIME): 
-                    output = fn(*args, **kwargs)
+                    output, alpha = fn(*args, **kwargs)
+                    print("ALPHA: ", alpha)
                     prof.step()
         else:
             for _ in range(TEST_TIME): 
@@ -72,27 +76,29 @@ def benchmark(fn, print_prefix, use_profiler=True, *args, **kwargs):
     print(f"\n [benchmark] {print_prefix}, tokens/sec: {len(output[0]) / t.elapsed / TEST_TIME}, {t.elapsed / TEST_TIME} sec generates {len(output[0])} tokens")
 
 def generate(input_text, approx_model_name, target_model_name, num_tokens=20, gamma = 4,
-             random_seed = None, verbose = False, use_benchmark = False, use_profiling = False):
+             random_seed = None, verbose = False, use_benchmark = False, use_profiling = False, gpu_num=0):
     # NOTE() approx_model_name and target_model_name should use the same tokenizer!
     
     # torch_device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    torch_device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
+    torch_device = f'cuda:{gpu_num}' if torch.cuda.is_available() else 'cpu'
     
     # if T5 model 
 
     if 't5' in approx_model_name: 
-        tokenizer = T5Tokenizer.from_pretrained('google/flan-t5-small', trust_remote_code=True)
+        tokenizer = T5Tokenizer.from_pretrained(approx_model_name, trust_remote_code=True)
   
         Decoder().set_tokenizer(tokenizer)
         
-        print(f"begin loading models: \n {'google/flan-t5-small'} \n {'google/flan-t5-large'}")
-        small_model = T5ForConditionalGeneration.from_pretrained('google/flan-t5-small', 
+        print(f"begin loading models: \n {approx_model_name} \n {approx_model_name}")
+        small_model = T5ForConditionalGeneration.from_pretrained(approx_model_name, 
                                                         torch_dtype=torch.float16,
-                                                        device_map="auto",
+                                                        # device_map="auto",
+                                                        device_map = torch_device,
                                                         trust_remote_code=True)
-        large_model = T5ForConditionalGeneration.from_pretrained('google/flan-t5-large', 
+        large_model = AutoModelForSeq2SeqLM.from_pretrained(approx_model_name, 
                                                         torch_dtype=torch.float16,
-                                                        device_map="auto",
+                                                        # device_map="auto",
+                                                        device_map = torch_device,
                                                         trust_remote_code=True)
         print("finish loading models")
 
@@ -105,12 +111,14 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
         small_model = AutoModelForCausalLM.from_pretrained(approx_model_name, 
                                                         torch_dtype=torch.float16,
                                                         # device_map="auto",
-                                                        device_map="cuda:1",
+                                                        # device_map="cuda:1",
+                                                        device_map = torch_device,                                                       
                                                         trust_remote_code=True)
         large_model = AutoModelForCausalLM.from_pretrained(target_model_name, 
                                                         torch_dtype=torch.float16,
                                                         # device_map="auto",
-                                                        device_map='cuda:1',
+                                                        # device_map='cuda:1',
+                                                        device_map = torch_device,
                                                         trust_remote_code=True)
         
         # large_model.to()
@@ -139,22 +147,25 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
         benchmark(autoregressive_sampling, "AS_small", use_profiling,
                   input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
     
-    torch.manual_seed(123)
-    output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
-    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-    color_print(f"deepmind's speculative_sampling: {generated_text}")   
+    # torch.manual_seed(123)
+    # output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
+    # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+    # color_print(f"deepmind's speculative_sampling: {generated_text}")   
 
     torch.manual_seed(123)
-    output = speculative_sampling(input_ids, small_model, large_model, num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed, verbose = verbose)
+    output, alpha = speculative_sampling(input_ids, small_model, large_model, num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed, verbose = verbose)
     generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
     color_print(f"google's speculative_sampling: {generated_text}")
+    color_print(f'alpha value: {alpha}')
     
     if use_benchmark:
         benchmark(speculative_sampling, "SP", use_profiling,
                   input_ids, small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
+        
+    return alpha
 
 if __name__ == "__main__":
     args = parse_arguments()
     
-    generate(args.input, args.approx_model_name, args.target_model_name, num_tokens=args.max_tokens, gamma=args.gamma,
-             random_seed = args.seed, verbose=args.verbose, use_benchmark = args.benchmark)
+    _ = generate(args.input, args.approx_model_name, args.target_model_name, num_tokens=args.max_tokens, gamma=args.gamma,
+             random_seed = args.seed, verbose=args.verbose, use_benchmark = args.benchmark, gpu_num=args.gpu_num)
