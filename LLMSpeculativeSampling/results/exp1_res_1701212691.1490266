@@ -1,0 +1,2 @@
+,text_index,target_model_name,approx_model_name,target_tok_p_sec,approx_token_p_sec,sp_tok_p_sec,alpha,gamma
+0,1,/p/realai/amir/Speculative-Decoding/LLMSpeculativeSampling/models1/bloom-560m,/p/realai/amir/Speculative-Decoding/LLMSpeculativeSampling/models1/bloomz-7b1,0.472125021279205,0.20083514556201335,0.06196997469896175,0.9999993443489075,7

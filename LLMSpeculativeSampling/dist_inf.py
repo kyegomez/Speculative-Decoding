@@ -4,7 +4,8 @@ import argparse
 import contexttimer
 from colorama import Fore, Style
 from transformers import AutoTokenizer, AutoModelForCausalLM
-
+import pandas as pd
+import time
 # Specific for T5 model 
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 
@@ -15,7 +16,12 @@ from accelerate import Accelerator
 
 
 # Example initial prompts
-data = ["a dog", "a cat", "a bird"]
+data  = [
+    "What are the best vegan restaurants in New York City?"
+    "How can I improve my time management skills?"
+    "Explain the theory of relativity in simple terms.",
+    "Suggest some exercises for beginners in yoga.",
+    "What are the top five science fiction books of the last decade?"]
 
 accelerator = Accelerator()
 
@@ -53,10 +59,10 @@ def parse_arguments():
 def color_print(text):
     print(Fore.RED + text + Style.RESET_ALL)
     
-def benchmark(fn, print_prefix, use_profiler=True, *args, **kwargs):
+def benchmark(fn, print_prefix, use_profiler=True, *args, **kwargs):    
     TEST_TIME = 10
     profile_filename = f"./profile_logs/{print_prefix}"
-
+    
     with contexttimer.Timer() as t:
         if use_profiler:
             with torch.profiler.profile(
@@ -65,16 +71,24 @@ def benchmark(fn, print_prefix, use_profiler=True, *args, **kwargs):
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(profile_filename),
                 record_shapes=False,
                 profile_memory=False,
-                # with_stack=True
             ) as prof:
+                try:
+                    for _ in range(TEST_TIME): 
+                        output, alpha = fn(*args, **kwargs)
+                except: 
+                    for _ in range(TEST_TIME): 
+                        output = fn(*args, **kwargs)
+        else:
+            try:
+                for _ in range(TEST_TIME): 
+                    output, alpha = fn(*args, **kwargs)
+            except: 
                 for _ in range(TEST_TIME): 
                     output = fn(*args, **kwargs)
-                    prof.step()
-        else:
-            for _ in range(TEST_TIME): 
-                output = fn(*args, **kwargs)
 
     print(f"\n [benchmark] {print_prefix}, tokens/sec: {len(output[0]) / t.elapsed / TEST_TIME}, {t.elapsed / TEST_TIME} sec generates {len(output[0])} tokens")
+    return len(output[0]) / t.elapsed / TEST_TIME
+
 
 def generate(input_text, approx_model_name, target_model_name, num_tokens=20, gamma = 4,
              random_seed = None, verbose = False, use_benchmark = False, use_profiling = False):
@@ -88,98 +102,116 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
 
     # if T5 model 
 
-    if 't5' in approx_model_name: 
-        tokenizer = T5Tokenizer.from_pretrained('google/flan-t5-small', trust_remote_code=True)
+    # if 't5' in approx_model_name: 
+    #     tokenizer = T5Tokenizer.from_pretrained('google/flan-t5-small', trust_remote_code=True)
   
-        Decoder().set_tokenizer(tokenizer)
+    #     Decoder().set_tokenizer(tokenizer)
         
-        print(f"begin loading models: \n {'google/flan-t5-small'} \n {'google/flan-t5-large'}")
-        small_model = T5ForConditionalGeneration.from_pretrained('google/flan-t5-small', 
-                                                        torch_dtype=torch.float16,
-                                                        device_map="auto",
-                                                        trust_remote_code=True)
-        large_model = T5ForConditionalGeneration.from_pretrained('google/flan-t5-large', 
-                                                        torch_dtype=torch.float16,
-                                                        device_map="auto",
-                                                        trust_remote_code=True)
-        print("finish loading models")
+    #     print(f"begin loading models: \n {'google/flan-t5-small'} \n {'google/flan-t5-large'}")
+    #     small_model = T5ForConditionalGeneration.from_pretrained('google/flan-t5-small', 
+    #                                                     torch_dtype=torch.float16,
+    #                                                     device_map="auto",
+    #                                                     trust_remote_code=True)
+    #     large_model = T5ForConditionalGeneration.from_pretrained('google/flan-t5-large', 
+    #                                                     torch_dtype=torch.float16,
+    #                                                     device_map="auto",
+    #                                                     trust_remote_code=True)
+    #     print("finish loading models")
 
-    else: 
-        tokenizer = AutoTokenizer.from_pretrained(approx_model_name, trust_remote_code=True)
+    # else: 
+    tokenizer = AutoTokenizer.from_pretrained(approx_model_name, trust_remote_code=True)
+
+    Decoder().set_tokenizer(tokenizer)
     
-        Decoder().set_tokenizer(tokenizer)
-        
-        # Here we use GPU 2 and 3, please make adjustions according to your specific env
-        print(f"begin loading models: \n {approx_model_name} \n {target_model_name}")
-        small_model = AutoModelForCausalLM.from_pretrained(approx_model_name, 
-                                                        torch_dtype=torch.float16,
-                                                        device_map="auto",
-                                                        # device_map="cuda:2",
-                                                        trust_remote_code=True,
-                                                        max_memory={2: "9GB", 3: "9GB"})
-        large_model = AutoModelForCausalLM.from_pretrained(target_model_name, 
-                                                        torch_dtype=torch.float16,
-                                                        device_map="auto",
-                                                        # device_map='cuda:2',
-                                                        trust_remote_code=True,
-                                                        max_memory={2: "9GB", 3: "9GB"})
-        
-        # large_model.to()
-        print("finish loading models")
+    # Here we use GPU 2 and 3, please make adjustions according to your specific env
+    print(f"begin loading models: \n {approx_model_name} \n {target_model_name}")
+    small_model = AutoModelForCausalLM.from_pretrained(approx_model_name, 
+                                                    torch_dtype=torch.float16,
+                                                    device_map="auto",
+                                                    # device_map="cuda:2",
+                                                    offload_folder='/p/realai/amir/Speculative-Decoding/LLMSpeculativeSampling/offload',
+                                                    trust_remote_code=True,
+                                                    
+                                                    max_memory={2: '8GB', 3: '8GB'})
+    large_model = AutoModelForCausalLM.from_pretrained(target_model_name, 
+                                                    torch_dtype=torch.float16,
+                                                    device_map="auto",
+                                                    # device_map='cuda:2',
+                                                    trust_remote_code=True,
+                                                    offload_folder='/p/realai/amir/Speculative-Decoding/LLMSpeculativeSampling/offload',
+                                                    max_memory={2: '8GB', 3: '8GB'})
     
+    # large_model.to()
+    print("finish loading models")
+
+   
+
     with accelerator.split_between_processes(data, ) as prompts:
+        
         for prompt in prompts:
+            target_tok_p_sec = None
+            approx_tok_p_sec = None
+            sp_tok_p_sec = None
             input_ids = tokenizer.encode(prompt, return_tensors='pt').to(torch_device)
 
             top_k = 20
             top_p = 0.9
-
+            p2res[accelerator.process_index] = []
             torch.manual_seed(123)
             output = autoregressive_sampling(input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
             generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-            p2res[accelerator.process_index] = [generated_text]
+            # p2res[accelerator.process_index] = [generated_text]
             # color_print(f"Process {accelerator.process_index} (target) model autoregressive_sampling: {generated_text}")
-    
-            if use_benchmark:
-                benchmark(autoregressive_sampling, "AS_large", use_profiling,
-                        input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
 
+            if use_benchmark:
+                target_tok_p_sec = benchmark(autoregressive_sampling, "AS_large", use_profiling,
+                        input_ids, large_model, num_tokens, top_k = top_k, top_p=top_p)
+                p2res[accelerator.process_index].append(target_tok_p_sec)
             torch.manual_seed(123)
             output = autoregressive_sampling(input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
             generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-            p2res[accelerator.process_index].append(generated_text)
+            # p2res[accelerator.process_index].append(generated_text)
             # color_print(f"Process {accelerator.process_index} small (approx) model autoregressive_sampling: {generated_text}")
     
             if use_benchmark:
-                benchmark(autoregressive_sampling, "AS_small", use_profiling,
+                approx_tok_p_sec = benchmark(autoregressive_sampling, "AS_small", use_profiling,
                           input_ids, small_model, num_tokens, top_k = top_k, top_p=top_p)
+                p2res[accelerator.process_index].append(approx_tok_p_sec)
     
             torch.manual_seed(123)
             output = speculative_sampling_v2(input_ids, small_model, large_model, num_tokens, top_k = top_k, top_p=top_p, random_seed = random_seed)
             generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-            p2res[accelerator.process_index].append(generated_text)
+            # p2res[accelerator.process_index].append(generated_text)
             # color_print(f"Process {accelerator.process_index}  deepmind's speculative_sampling: {generated_text}")   
 
             torch.manual_seed(123)
-            output = speculative_sampling(input_ids, small_model, large_model, num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed, verbose = verbose)
+            output, alpha = speculative_sampling(input_ids, small_model, large_model, num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed, verbose = verbose)
             generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-            p2res[accelerator.process_index].append(generated_text)
+            # p2res[accelerator.process_index].append(generated_text)
+            p2res[accelerator.process_index].append(alpha)
             # color_print(f"Process {accelerator.process_index}  google's speculative_sampling: {generated_text}")
     
             if use_benchmark:
-                benchmark(speculative_sampling, "SP", use_profiling,
+                sp_tok_p_sec = benchmark(speculative_sampling, "SP", use_profiling,
                         input_ids, small_model, large_model, max_len = num_tokens, gamma = gamma, top_k = top_k, top_p=top_p, random_seed = random_seed)
-        
-        # print(p2res)
-        print("Results")
-        for k, v in p2res.items():
-            print("Process ", k)
-            color_print(f"(target) model autoregressive_sampling: {v[0]}")
-            color_print(f"small (approx) model autoregressive_sampling: {v[1]}")
-            color_print(f"deepmind's speculative_sampling: {v[2]}")
-            color_print(f"google's speculative_sampling: {v[3]}\n")
+                p2res[accelerator.process_index].append(sp_tok_p_sec)
 
+            df = pd.DataFrame(columns=['text_index', 'target_model_name', 'approx_model_name', 'target_tok_p_sec', 'approx_token_p_sec', 'sp_tok_p_sec', 'alpha', 'gamma'])
+            print(sp_tok_p_sec)
+            new_row = pd.DataFrame({'text_index': [accelerator.process_index],
+                                    'target_model_name': target_model_name,
+                                    'approx_model_name': approx_model_name,
+                                    'target_tok_p_sec': [target_tok_p_sec],
+                                    'approx_token_p_sec': [approx_tok_p_sec],
+                                    'sp_tok_p_sec': [sp_tok_p_sec],
+                                    'alpha': [alpha],
+                                    'gamma':[gamma]})
+            
+            df = pd.concat([df, new_row], ignore_index=True)
 
+            df.to_csv(f'/p/realai/amir/Speculative-Decoding/LLMSpeculativeSampling/results2/exp1_res_{time.time()}')
+
+            
 if __name__ == "__main__":
     args = parse_arguments()
     

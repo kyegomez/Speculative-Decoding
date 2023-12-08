@@ -108,19 +108,17 @@ def generate(input_text, approx_model_name, target_model_name, num_tokens=20, ga
         Decoder().set_tokenizer(tokenizer)
         
         print(f"begin loading models: \n {approx_model_name} \n {target_model_name}")
-        small_model = AutoModelForCausalLM.from_pretrained(approx_model_name, 
-                                                        torch_dtype=torch.float16,
-                                                        # device_map="auto",
-                                                        # device_map="cuda:1",
-                                                        device_map = torch_device,                                                       
-                                                        trust_remote_code=True)
+        small_model = AutoModelForCausalLM.from_pretrained(
+            approx_model_name,
+            torch_dtype=torch.float16,
+            device_map='auto',
+            trust_remote_code=True,
+            max_memory={0:'8GB', 1:'8GB', 2: '8GB', 3: '8GB', 4: '8GB', 5: '8GB', 6: '8GB', 7: '8GB'})
         large_model = AutoModelForCausalLM.from_pretrained(target_model_name, 
-                                                        torch_dtype=torch.float16,
-                                                        # device_map="auto",
-                                                        # device_map='cuda:1',
-                                                        device_map = torch_device,
-                                                        trust_remote_code=True)
-        
+            torch_dtype=torch.float16,
+            device_map='auto',
+            trust_remote_code=True,
+            max_memory={0:'8GB', 1:'8GB', 2: '8GB', 3: '8GB', 4: '8GB', 5: '8GB', 6: '8GB', 7: '8GB'})
         # large_model.to()
         print("finish loading models")
     
